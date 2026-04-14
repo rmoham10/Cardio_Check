@@ -1,0 +1,29 @@
+HEART DISEASE TRAINING REPORT
+============================================================
+
+MODEL COMPARISON:
+LogisticRegression: 0.7886
+RandomForest: 0.7520
+ExtraTrees: 0.7257
+GradientBoosting: 0.7967
+XGBoost: 0.7942
+LightGBM: 0.7946
+SVM: 0.7825
+
+BEST MODEL:
+GradientBoosting
+
+FINAL METRICS:
+Accuracy: 0.7320
+AUC: 0.7993
+F1 Score: 0.7192
+
+CLASSIFICATION REPORT:
+              precision    recall  f1-score   support
+
+           0       0.72      0.77      0.74      6901
+           1       0.74      0.70      0.72      6729
+
+    accuracy                           0.73     13630
+   macro avg       0.73      0.73      0.73     13630
+weighted avg       0.73      0.73      0.73     13630

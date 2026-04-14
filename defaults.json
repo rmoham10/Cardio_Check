@@ -1,0 +1,14 @@
+{
+    "age_years": 53.0,
+    "height": 165.0,
+    "weight": 72.0,
+    "ap_hi": 120.0,
+    "ap_lo": 80.0,
+    "bmi": 26.332888752094664,
+    "gender": 1,
+    "cholesterol": 1,
+    "gluc": 1,
+    "smoke": 0,
+    "alco": 0,
+    "active": 1
+}
