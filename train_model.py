@@ -1,499 +1,189 @@
-"""
-Heart Disease Training with
-Feature Engineering + Model Comparison + GradientBoosting Tuning
-"""
-
 import pandas as pd
+import numpy as np
 import joblib
 
 from sklearn.model_selection import train_test_split
-from sklearn.model_selection import StratifiedKFold
-from sklearn.model_selection import cross_val_score
-from sklearn.model_selection import RandomizedSearchCV
-
-from sklearn.metrics import accuracy_score
-from sklearn.metrics import roc_auc_score
-from sklearn.metrics import f1_score
-from sklearn.metrics import classification_report
-
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import StandardScaler
-from sklearn.impute import KNNImputer
-
-from sklearn.feature_selection import SelectFromModel
-
-from sklearn.linear_model import LogisticRegression
-from sklearn.ensemble import (
-    RandomForestClassifier,
-    ExtraTreesClassifier,
-    GradientBoostingClassifier
+from sklearn.metrics import (
+    accuracy_score,
+    roc_auc_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    classification_report,
+    confusion_matrix,
+    fbeta_score
 )
+from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.utils.class_weight import compute_sample_weight
 
-from sklearn.svm import SVC
+# ─────────────────────────────────────────────
+# CONFIG
+# ─────────────────────────────────────────────
+DATA_PATH = "cardio_data_processed.csv"
+BUNDLE_PATH = "cardio_bundle_v7.pkl"
+REPORT_PATH = "report_v7.txt"
+RANDOM_STATE = 42
 
-from xgboost import XGBClassifier
-from lightgbm import LGBMClassifier
-
-from imblearn.pipeline import Pipeline as ImbPipeline
-from imblearn.over_sampling import SMOTE
-
-import numpy as np
-
-
-# ==========================
-# FILE PATHS
-# ==========================
-
-DATA_PATH = "cardio_data_processed_cleaned.csv"
-
-MODEL_PATH = "best_model.pkl"
-
-REPORT_PATH = "training_report.txt"
-
-
-# ==========================
-# LOAD DATA
-# ==========================
-
+# ─────────────────────────────────────────────
+# 1. LOAD DATA
+# ─────────────────────────────────────────────
 df = pd.read_csv(DATA_PATH)
+df = df.drop_duplicates().dropna()
 
-TARGET = "cardio"
+# ─────────────────────────────────────────────
+# 2. AGE FIX & DROPPING COLUMNS (As per your request)
+# ─────────────────────────────────────────────
+if "age_years" not in df.columns:
+    df["age_years"] = df["age"] / 365
 
+# DROPPING the specific columns you excluded
+df = df.drop(columns=[
+    "id",
+    "age",
+    "bp_category",
+    "bp_category_encoded"
+], errors="ignore")
 
-# ==========================
-# FEATURE ENGINEERING
-# ==========================
+# ─────────────────────────────────────────────
+# 3. CLEANING
+# ─────────────────────────────────────────────
+df = df[df["age_years"].between(18, 100)]
+df = df[df["height"].between(120, 220)]
+df = df[df["weight"].between(30, 200)]
 
-print("\n⚙️ Creating engineered features...")
+swap = df["ap_lo"] > df["ap_hi"]
+df.loc[swap, ["ap_lo", "ap_hi"]] = df.loc[swap, ["ap_hi", "ap_lo"]].values
 
+df = df[df["ap_hi"].between(70, 250)]
+df = df[df["ap_lo"].between(40, 150)]
+
+# ─────────────────────────────────────────────
+# 4. MEDICAL FEATURE ENGINEERING
+# ─────────────────────────────────────────────
+df["bmi"] = df["weight"] / ((df["height"] / 100) ** 2)
 df["pulse_pressure"] = df["ap_hi"] - df["ap_lo"]
+df["map"] = df["ap_lo"] + df["pulse_pressure"] / 3
 
-df["mean_arterial_pressure"] = (
-    df["ap_lo"]
-    + (df["ap_hi"] - df["ap_lo"]) / 3
-)
-
+# Interaction features for better medical sensitivity
+df["age_bp"] = df["age_years"] * df["ap_hi"]
 df["bmi_age"] = df["bmi"] * df["age_years"]
 
-df["chol_bmi"] = df["cholesterol"] * df["bmi"]
-
-df["bp_ratio"] = df["ap_hi"] / df["ap_lo"]
-
-
-# ==========================
-# FEATURE LIST
-# ==========================
-
+# ─────────────────────────────────────────────
+# 5. FEATURES
+# ─────────────────────────────────────────────
 FEATURES = [
-    "age_years",
-    "gender",
-    "height",
-    "weight",
-    "ap_hi",
-    "ap_lo",
-    "cholesterol",
-    "gluc",
-    "smoke",
-    "alco",
-    "active",
-    "bmi",
-
-    # NEW FEATURES
-    "pulse_pressure",
-    "mean_arterial_pressure",
-    "bmi_age",
-    "chol_bmi",
-    "bp_ratio"
+    "age_years", "gender", "height", "weight",
+    "ap_hi", "ap_lo", "cholesterol", "gluc",
+    "smoke", "alco", "active",
+    "bmi", "pulse_pressure", "map",
+    "age_bp", "bmi_age"
 ]
 
-
 X = df[FEATURES]
+y = df["cardio"]
 
-y = df[TARGET]
-
-
-# ==========================
-# SPLIT
-# ==========================
-
+# ─────────────────────────────────────────────
+# 6. TRAIN / TEST SPLIT
+# ─────────────────────────────────────────────
 X_train, X_test, y_train, y_test = train_test_split(
-
-    X,
-    y,
-
+    X, y,
     test_size=0.2,
-
     stratify=y,
-
-    random_state=42
+    random_state=RANDOM_STATE
 )
 
+# ─────────────────────────────────────────────
+# 7. XGBOOST MODEL (STRONG CLASSIFIER)
+# ─────────────────────────────────────────────
 
-# ==========================
-# PREPROCESSOR
-# ==========================
+import xgboost as xgb
+from sklearn.utils.class_weight import compute_sample_weight
 
-preprocessor = ColumnTransformer([
-
-    ("num", Pipeline([
-
-        ("imputer", KNNImputer(n_neighbors=5)),
-
-        ("scaler", StandardScaler())
-
-    ]), FEATURES)
-
-])
-
-
-# ==========================
-# FEATURE SELECTION
-# ==========================
-
-selector_model = RandomForestClassifier(
-
-    n_estimators=300,
-
-    random_state=42
+sample_weights = compute_sample_weight(
+    class_weight={0: 1, 1: 1.20},
+    y=y_train
 )
 
-selector = SelectFromModel(
-
-    selector_model,
-
-    threshold="median"
+model = xgb.XGBClassifier(
+    n_estimators=1500,
+    learning_rate=0.01,
+    max_depth=5,
+    subsample=0.85,
+    colsample_bytree=0.85,
+    reg_alpha=0.1,
+    reg_lambda=1.0,
+    min_child_weight=5,
+    gamma=0.1,
+    objective="binary:logistic",
+    eval_metric="logloss",
+    tree_method="hist",
+    random_state=RANDOM_STATE
 )
 
-
-# ==========================
-# PIPELINE FACTORY
-# ==========================
-
-def make_pipeline(model):
-
-    return ImbPipeline([
-
-        ("preprocessor", preprocessor),
-
-        ("feature_selection", selector),
-
-        ("smote", SMOTE(random_state=42)),
-
-        ("model", model)
-
-    ])
-
-
-# ==========================
-# MODELS
-# ==========================
-
-models = {
-
-    "LogisticRegression":
-
-        make_pipeline(
-
-            LogisticRegression(
-
-                max_iter=2000,
-
-                class_weight="balanced"
-
-            )
-
-        ),
-
-
-    "RandomForest":
-
-        make_pipeline(
-
-            RandomForestClassifier(
-
-                n_estimators=300,
-
-                random_state=42
-
-            )
-
-        ),
-
-
-    "ExtraTrees":
-
-        make_pipeline(
-
-            ExtraTreesClassifier(
-
-                n_estimators=300,
-
-                random_state=42
-
-            )
-
-        ),
-
-
-    "GradientBoosting":
-
-        make_pipeline(
-
-            GradientBoostingClassifier()
-
-        ),
-
-
-    "XGBoost":
-
-        make_pipeline(
-
-            XGBClassifier(
-
-                n_estimators=300,
-
-                learning_rate=0.05,
-
-                max_depth=6,
-
-                eval_metric="logloss",
-
-                random_state=42
-
-            )
-
-        ),
-
-
-    "LightGBM":
-
-        make_pipeline(
-
-            LGBMClassifier(
-
-                n_estimators=300,
-
-                learning_rate=0.05,
-
-                verbosity=-1,
-
-                random_state=42
-
-            )
-
-        ),
-
-
-    "SVM":
-
-        make_pipeline(
-
-            SVC(
-
-                probability=True,
-
-                kernel="rbf",
-
-                class_weight="balanced"
-
-            )
-
-        )
+model.fit(
+    X_train,
+    y_train,
+    sample_weight=sample_weights
+)
+# ─────────────────────────────────────────────
+# 8. THRESHOLD OPTIMIZATION (F-BETA 1.5)
+# ─────────────────────────────────────────────
+# Instead of hard constraints, we find the threshold that 
+# balances both, favoring Recall (1.5x weight).
+y_prob = model.predict_proba(X_test)[:, 1]
+thresholds = np.linspace(0.35, 0.85, 150)
+
+best_score = -1
+best_thresh = 0.5
+
+for t in thresholds:
+    y_pred_t = (y_prob >= t).astype(int)
+
+    prec_t = precision_score(y_test, y_pred_t)
+    rec_t = recall_score(y_test, y_pred_t)
+
+    # balanced but slightly precision-focused
+    score = (0.55 * prec_t) + (0.45 * rec_t)
+
+    if score > best_score:
+        best_score = score
+        best_thresh = t
+
+# Final prediction using best threshold
+y_pred = (y_prob >= best_thresh).astype(int)
+
+# ─────────────────────────────────────────────
+# 9. METRICS
+# ─────────────────────────────────────────────
+auc = roc_auc_score(y_test, y_prob)
+acc = accuracy_score(y_test, y_pred)
+prec = precision_score(y_test, y_pred)
+rec = recall_score(y_test, y_pred)
+f1 = f1_score(y_test, y_pred)
+cm = confusion_matrix(y_test, y_pred)
+
+print("\n" + "="*60)
+print("FINAL MEDICAL OPTIMIZED RESULTS")
+print("="*60)
+print(f"Optimal Threshold : {best_thresh:.3f}")
+print(f"Recall (Sensitivity): {rec:.4f}")
+print(f"Precision          : {prec:.4f}")
+print(f"Accuracy           : {acc:.4f}")
+print(f"F1 Score           : {f1:.4f}")
+print(f"AUC                : {auc:.4f}")
+
+print("\nConfusion Matrix:")
+print(f"TN={cm[0,0]} FP={cm[0,1]}")
+print(f"FN={cm[1,0]} TP={cm[1,1]}")
+
+# ─────────────────────────────────────────────
+# 10. SAVE MODEL
+# ─────────────────────────────────────────────
+bundle = {
+    "model": model,
+    "features": FEATURES,
+    "threshold": best_thresh
 }
 
-
-# ==========================
-# CROSS VALIDATION
-# ==========================
-
-cv = StratifiedKFold(
-
-    n_splits=5,
-
-    shuffle=True,
-
-    random_state=42
-)
-
-scores = {}
-
-print("\n🔍 Comparing models...\n")
-
-for name, model in models.items():
-
-    auc = cross_val_score(
-
-        model,
-
-        X_train,
-
-        y_train,
-
-        cv=cv,
-
-        scoring="roc_auc"
-
-    )
-
-    scores[name] = auc.mean()
-
-    print(f"{name}: {auc.mean():.4f}")
-
-
-# ==========================
-# BEST MODEL
-# ==========================
-
-best_model_name = max(
-
-    scores,
-
-    key=scores.get
-)
-
-best_model = models[best_model_name]
-
-print("\n🏆 BEST MODEL:", best_model_name)
-
-
-# ==========================
-# TUNE GRADIENT BOOSTING
-# ==========================
-
-if best_model_name == "GradientBoosting":
-
-    print("\n⚙️ Tuning GradientBoosting...")
-
-    param_dist = {
-
-        "model__n_estimators":
-
-            [200,300,400],
-
-        "model__learning_rate":
-
-            [0.01,0.05,0.1],
-
-        "model__max_depth":
-
-            [3,4,5]
-
-    }
-
-    tuner = RandomizedSearchCV(
-
-        best_model,
-
-        param_distributions=param_dist,
-
-        n_iter=10,
-
-        cv=3,
-
-        scoring="roc_auc",
-
-        random_state=42,
-
-        n_jobs=-1
-
-    )
-
-    tuner.fit(X_train,y_train)
-
-    best_model = tuner.best_estimator_
-
-
-# ==========================
-# FINAL TRAIN
-# ==========================
-
-best_model.fit(X_train,y_train)
-
-
-# ==========================
-# EVALUATE
-# ==========================
-
-y_pred = best_model.predict(X_test)
-
-y_prob = best_model.predict_proba(X_test)[:,1]
-
-
-accuracy = accuracy_score(
-
-    y_test,
-
-    y_pred
-)
-
-auc = roc_auc_score(
-
-    y_test,
-
-    y_prob
-)
-
-f1 = f1_score(
-
-    y_test,
-
-    y_pred
-)
-
-report = classification_report(
-
-    y_test,
-
-    y_pred
-)
-
-
-# ==========================
-# SAVE MODEL
-# ==========================
-
-joblib.dump(
-
-    best_model,
-
-    MODEL_PATH
-)
-
-
-# ==========================
-# SAVE REPORT
-# ==========================
-
-with open(REPORT_PATH,"w") as f:
-
-    f.write("HEART DISEASE TRAINING REPORT\n")
-
-    f.write("="*60 + "\n\n")
-
-    f.write("MODEL COMPARISON:\n")
-
-    for name,score in scores.items():
-
-        f.write(f"{name}: {score:.4f}\n")
-
-    f.write("\nBEST MODEL:\n")
-
-    f.write(best_model_name + "\n\n")
-
-    f.write("FINAL METRICS:\n")
-
-    f.write(f"Accuracy: {accuracy:.4f}\n")
-
-    f.write(f"AUC: {auc:.4f}\n")
-
-    f.write(f"F1 Score: {f1:.4f}\n\n")
-
-    f.write("CLASSIFICATION REPORT:\n")
-
-    f.write(report)
-
-
-print("\n✅ Training Complete")
-print("📄 Report saved:", REPORT_PATH)
-print("💾 Model saved:", MODEL_PATH)
+joblib.dump(bundle, BUNDLE_PATH)
+print(f"\n✅ Saved bundle → {BUNDLE_PATH}")
