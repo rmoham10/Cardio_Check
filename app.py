@@ -174,7 +174,7 @@ def contact():
         message["To"] = TO_EMAIL
         message["Reply-To"] = email
 
-        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server = smtplib.SMTP("smtp.gmail.com", 587, timeout=10)
         server.starttls()
         server.login(EMAIL_USER, EMAIL_PASS)
         server.sendmail(EMAIL_USER, TO_EMAIL, message.as_string())
