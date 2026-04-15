@@ -41,7 +41,7 @@ Built with a Flask backend + JavaScript frontend, the app uses a trained Gradien
 - Accuracy: ~70%
 - ROC-AUC: ~0.80
 - Recall: ~0.84
-- Precision: ~0.70
+- Precision: ~0.66
 
 ---
 
