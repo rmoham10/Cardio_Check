@@ -306,12 +306,42 @@ function showToast(msg) {
 function sendContact() {
   const name = document.getElementById('c-name').value;
   const email = document.getElementById('c-email').value;
+  const subject = document.getElementById('c-subject').value;
   const msg = document.getElementById('c-msg').value;
-  if (!name || !email || !msg) { showToast('Please fill in all fields ✋'); return; }
-  showToast('Message sent! We\'ll get back to you soon 🫀');
-  document.getElementById('c-name').value = '';
-  document.getElementById('c-email').value = '';
-  document.getElementById('c-msg').value = '';
+
+  if (!name || !email || !msg) {
+    showToast('Please fill in all fields ✋');
+    return;
+  }
+
+  fetch("/api/contact", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      name: name,
+      email: email,
+      msg: msg,
+      subject: subject
+    })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success) {
+      showToast("Message sent! We'll get back to you soon 🫀");
+
+      document.getElementById('c-name').value = "";
+      document.getElementById('c-email').value = "";
+      document.getElementById('c-msg').value = "";
+      document.getElementById('c-subject').value = "General";
+    } else {
+      showToast("Failed to send message ❌");
+    }
+  })
+  .catch(() => {
+    showToast("Server error ❌");
+  });
 }
 
 // ── feat card mouse tracking ───────────────────────────

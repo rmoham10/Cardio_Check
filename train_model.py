@@ -176,14 +176,5 @@ print("\nConfusion Matrix:")
 print(f"TN={cm[0,0]} FP={cm[0,1]}")
 print(f"FN={cm[1,0]} TP={cm[1,1]}")
 
-# ─────────────────────────────────────────────
-# 10. SAVE MODEL
-# ─────────────────────────────────────────────
-bundle = {
-    "model": model,
-    "features": FEATURES,
-    "threshold": best_thresh
-}
 
-joblib.dump(bundle, BUNDLE_PATH)
 print(f"\n✅ Saved bundle → {BUNDLE_PATH}")
